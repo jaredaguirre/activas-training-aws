@@ -8,31 +8,7 @@ Managed with Terraform. Targets Argentina-only users (~300 MAU).
 
 ## Architecture
 
-```
-                        ┌─────────────────────────────────────┐
-                        │          mamisactivas.com.ar         │
-                        │             (nic.ar + Route 53)      │
-                        └────────────────┬────────────────────┘
-                                         │
-              ┌──────────────────────────┼──────────────────────────┐
-              │                          │                          │
-              ▼                          ▼                          ▼
-     ┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
-     │   AWS Amplify   │      │   CloudFront     │      │  Amazon Cognito │
-     │  (SSR Next.js)  │      │  geo-block: AR   │      │  (auth + JWT)   │
-     │  app + public   │      │  PriceClass_All  │      │                 │
-     └────────┬────────┘      └────────┬─────────┘      └────────┬────────┘
-              │                        │ OAC (SigV4)              │
-              │                        ▼                          │ post-confirm
-              │               ┌─────────────────┐                 │ trigger
-              │               │    S3 bucket    │                 ▼
-              │               │  (media, priv.) │      ┌─────────────────┐
-              │               └─────────────────┘      │    DynamoDB     │
-              │                                        │  (single-table) │
-              └──────────────────────────────────────► │  users, enroll, │
-                          API routes                   │  progress       │
-                                                       └─────────────────┘
-```
+![Architecture diagram](utils/images/arquitectura.png)
 
 ---
 
