@@ -143,28 +143,121 @@ resource "aws_s3_bucket_policy" "media" {
   depends_on = [aws_s3_bucket_public_access_block.media]
 }
 
-# ── Outputs ───────────────────────────────────────────────────────────────────
+# ── SSM: Cognito social provider credentials ──────────────────────────────────
 
-output "media_bucket_name" {
-  value = aws_s3_bucket.media.bucket
+data "aws_ssm_parameter" "google_client_id" {
+  name = "/${local.project}/${local.env}/google/client_id"
 }
 
-output "media_bucket_arn" {
-  value = aws_s3_bucket.media.arn
+data "aws_ssm_parameter" "google_client_secret" {
+  name            = "/${local.project}/${local.env}/google/client_secret"
+  with_decryption = true
 }
 
-output "cloudfront_oac_id" {
-  value = aws_cloudfront_origin_access_control.media.id
+
+# ── Cognito: User Pool ────────────────────────────────────────────────────────
+
+resource "aws_cognito_user_pool" "main" {
+  name = "${local.project}-${local.env}"
+
+  username_attributes      = ["email"]
+  auto_verified_attributes = ["email"]
+
+  password_policy {
+    minimum_length    = 8
+    require_uppercase = false
+    require_lowercase = false
+    require_numbers   = false
+    require_symbols   = false
+  }
+
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+
+  schema {
+    name                = "name"
+    attribute_data_type = "String"
+    mutable             = true
+    required            = true
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 100
+    }
+  }
+
+  tags = local.common_tags
 }
 
-output "cloudfront_distribution_id" {
-  value = aws_cloudfront_distribution.media.id
+# ── Cognito: Hosted UI domain ─────────────────────────────────────────────────
+
+resource "aws_cognito_user_pool_domain" "main" {
+  domain       = "${local.project}-${local.env}"
+  user_pool_id = aws_cognito_user_pool.main.id
 }
 
-output "cloudfront_distribution_arn" {
-  value = aws_cloudfront_distribution.media.arn
+# ── Cognito: Identity Providers ───────────────────────────────────────────────
+
+resource "aws_cognito_identity_provider" "google" {
+  user_pool_id  = aws_cognito_user_pool.main.id
+  provider_name = "Google"
+  provider_type = "Google"
+
+  provider_details = {
+    client_id        = data.aws_ssm_parameter.google_client_id.value
+    client_secret    = data.aws_ssm_parameter.google_client_secret.value
+    authorize_scopes = "email profile openid"
+  }
+
+  attribute_mapping = {
+    email    = "email"
+    name     = "name"
+    username = "sub"
+  }
 }
 
-output "cloudfront_domain_name" {
-  value = aws_cloudfront_distribution.media.domain_name
+
+# ── Cognito: App Client (Next.js) ─────────────────────────────────────────────
+
+resource "aws_cognito_user_pool_client" "nextjs" {
+  name         = "${local.project}-nextjs-${local.env}"
+  user_pool_id = aws_cognito_user_pool.main.id
+
+  generate_secret = false
+
+  supported_identity_providers = [
+    "COGNITO",
+    "Google",
+  ]
+
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["email", "openid", "profile"]
+
+  callback_urls = [
+    "http://localhost:3000/api/auth/callback/cognito",
+    "https://app.mamisactivas.com.ar/api/auth/callback/cognito",
+  ]
+
+  logout_urls = [
+    "http://localhost:3000",
+    "https://app.mamisactivas.com.ar",
+  ]
+
+  access_token_validity  = 1
+  id_token_validity      = 1
+  refresh_token_validity = 30
+
+  token_validity_units {
+    access_token  = "hours"
+    id_token      = "hours"
+    refresh_token = "days"
+  }
+
+  depends_on = [
+    aws_cognito_identity_provider.google,
+  ]
 }
